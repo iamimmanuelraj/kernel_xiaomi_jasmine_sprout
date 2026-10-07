@@ -17,6 +17,7 @@
 #include <linux/of_irq.h>
 #include <linux/notifier.h>
 #include <linux/fb.h>
+#include <linux/console.h>
 #include "nt36xxx.h"
 
 #if TOUCHSCREEN_LAVENDER
@@ -712,6 +713,18 @@ out:
 	return ret;
 }
 
+/*
+ * The touch controller is part of the display IC and only comes up after the
+ * panel power-up sequence (LCD reset, init cmds, touch reset) has run in the
+ * kernel.  Bootloader continuous splash leaves the panel on, so that sequence
+ * is skipped at boot.  Run one display off/on cycle once userspace has taken
+ * over the display (see nvt_late_init_work()).
+ */
+static void nvt_late_init_work(struct work_struct *work);
+static DECLARE_DELAYED_WORK(nvt_late_work, nvt_late_init_work);
+static bool nvt_late_started;
+static bool nvt_late_armed;
+
 static inline int32_t nvt_ts_probe(struct i2c_client *client,
 			    const struct i2c_device_id *id)
 {
@@ -864,6 +877,8 @@ static inline int32_t nvt_ts_probe(struct i2c_client *client,
 	bTouchIsAwake = 1;
 	nvt_irq_enable(true);
 
+	schedule_delayed_work(&nvt_late_work, msecs_to_jiffies(60000));
+
 	return 0;
 
 	fb_unregister_client(&ts->fb_notif);
@@ -914,6 +929,8 @@ err_gpio_config_failed:
 
 static inline int32_t nvt_ts_remove(struct i2c_client *client)
 {
+	cancel_delayed_work_sync(&nvt_late_work);
+
 	if (ts->coord_workqueue)
 		destroy_workqueue(ts->coord_workqueue);
 
@@ -1113,6 +1130,13 @@ static int __always_inline nvt_fb_notifier_callback(struct notifier_block *self,
 #endif
 	} else if (evdata && evdata->data && event == FB_EVENT_BLANK) {
 		blank = evdata->data;
+		if (*blank == FB_BLANK_UNBLANK && !nvt_late_armed &&
+		    !nvt_late_started) {
+			/* userspace owns the display now; do the display cycle shortly */
+			nvt_late_armed = true;
+			mod_delayed_work(system_wq, &nvt_late_work,
+					 msecs_to_jiffies(8000));
+		}
 		if (*blank == FB_BLANK_UNBLANK)
 #if TOUCHSCREEN_LAVENDER
 			schedule_work(&g_resume_work);
@@ -1122,6 +1146,34 @@ static int __always_inline nvt_fb_notifier_callback(struct notifier_block *self,
 	}
 
 	return 0;
+}
+
+static void nvt_fb_set_blank(struct fb_info *fbi, int blank)
+{
+	/* same as writing to /sys/class/graphics/fb0/blank */
+	console_lock();
+	fbi->flags |= FBINFO_MISC_USEREVENT;
+	fb_blank(fbi, blank);
+	fbi->flags &= ~FBINFO_MISC_USEREVENT;
+	console_unlock();
+}
+
+static void nvt_late_init_work(struct work_struct *work)
+{
+	struct fb_info *fbi = registered_fb[0];
+
+	if (nvt_late_started)
+		return;
+	nvt_late_started = true;
+
+	if (!fbi)
+		return;
+
+	pr_info("NVT-ts: running display off/on cycle to start touch controller\n");
+
+	nvt_fb_set_blank(fbi, FB_BLANK_POWERDOWN);
+	msleep(300);
+	nvt_fb_set_blank(fbi, FB_BLANK_UNBLANK);
 }
 
 static const struct i2c_device_id nvt_ts_id[] = {
