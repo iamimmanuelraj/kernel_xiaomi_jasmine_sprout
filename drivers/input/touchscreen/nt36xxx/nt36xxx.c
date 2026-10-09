@@ -1017,7 +1017,7 @@ static void nvt_post_resume_work_fn(struct work_struct *work)
 	/* the panel's own reset sequence can land after our resume: redo it */
 	if (!bTouchIsAwake)
 		return;
-	nvt_dbg_state("post-resume-0.8s");
+	nvt_dbg_state("post-resume-0.5s");
 	mutex_lock(&ts->lock);
 	nvt_bootloader_reset();
 	mutex_unlock(&ts->lock);
@@ -1097,9 +1097,6 @@ static int32_t __always_inline nvt_ts_resume(struct device *dev)
 
 #if NVT_TOUCH_SUPPORT_HW_RST
 	gpio_set_value(ts->reset_gpio, 1);
-#else
-	/* no reset line: wake the controller from the 0x11 sleep command */
-	nvt_bootloader_reset();
 #endif
 
 	if (nvt_check_fw_reset_state(RESET_STATE_REK)) {
@@ -1128,7 +1125,7 @@ static int32_t __always_inline nvt_ts_resume(struct device *dev)
 	mutex_unlock(&ts->lock);
 	if (nvt_late_started)
 		schedule_delayed_work(&nvt_post_resume_work,
-				      msecs_to_jiffies(800));
+				      msecs_to_jiffies(500));
 #if XIAOMI_PANEL && WAKEUP_GESTURE
 	suspend_state = false;
 	delay_gesture = false;
