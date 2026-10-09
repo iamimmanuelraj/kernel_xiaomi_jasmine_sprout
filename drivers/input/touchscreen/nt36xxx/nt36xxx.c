@@ -991,6 +991,9 @@ static inline void nvt_ts_shutdown(struct i2c_client *client)
 #endif
 }
 
+static void nvt_post_resume_work_fn(struct work_struct *work);
+static DECLARE_DELAYED_WORK(nvt_post_resume_work, nvt_post_resume_work_fn);
+
 static void nvt_dbg_state(const char *tag)
 {
 	uint8_t buf[8] = { 0 };
@@ -1009,6 +1012,21 @@ static void nvt_dbg_state(const char *tag)
 		buf[5]);
 }
 
+static void nvt_post_resume_work_fn(struct work_struct *work)
+{
+	/* the panel's own reset sequence can land after our resume: redo it */
+	if (!bTouchIsAwake)
+		return;
+	nvt_dbg_state("post-resume-0.8s");
+	mutex_lock(&ts->lock);
+	nvt_bootloader_reset();
+	mutex_unlock(&ts->lock);
+	msleep(1000);
+	nvt_dbg_state("post-resume-reset+1s");
+	msleep(2000);
+	nvt_dbg_state("post-resume-reset+3s");
+}
+
 static int32_t __always_inline nvt_ts_suspend(struct device *dev)
 {
 	uint8_t buf[4] = { 0 };
@@ -1016,6 +1034,8 @@ static int32_t __always_inline nvt_ts_suspend(struct device *dev)
 
 	if (!bTouchIsAwake)
 		return 0;
+
+	cancel_delayed_work_sync(&nvt_post_resume_work);
 
 #if !WAKEUP_GESTURE
 	nvt_irq_enable(false);
@@ -1106,6 +1126,9 @@ static int32_t __always_inline nvt_ts_resume(struct device *dev)
 	bTouchIsAwake = 1;
 
 	mutex_unlock(&ts->lock);
+	if (nvt_late_started)
+		schedule_delayed_work(&nvt_post_resume_work,
+				      msecs_to_jiffies(800));
 #if XIAOMI_PANEL && WAKEUP_GESTURE
 	suspend_state = false;
 	delay_gesture = false;
