@@ -1014,17 +1014,11 @@ static void nvt_dbg_state(const char *tag)
 
 static void nvt_post_resume_work_fn(struct work_struct *work)
 {
-	/* the panel's own reset sequence can land after our resume: redo it */
 	if (!bTouchIsAwake)
 		return;
 	nvt_dbg_state("post-resume-0.5s");
-	mutex_lock(&ts->lock);
-	nvt_bootloader_reset();
-	mutex_unlock(&ts->lock);
-	msleep(1000);
-	nvt_dbg_state("post-resume-reset+1s");
-	msleep(2000);
-	nvt_dbg_state("post-resume-reset+3s");
+	msleep(2500);
+	nvt_dbg_state("post-resume-3s");
 }
 
 static int32_t __always_inline nvt_ts_suspend(struct device *dev)
@@ -1056,10 +1050,12 @@ static int32_t __always_inline nvt_ts_suspend(struct device *dev)
 		enable_irq_wake(ts->client->irq);
 #if XIAOMI_PANEL
 	} else {
+		/*
+		 * Keep the controller in normal scan mode (no 0x11 deep sleep):
+		 * waking it from deep sleep needs a full firmware restart that
+		 * costs ~1.5s of dead touch after every screen-on.
+		 */
 		nvt_irq_enable(false);
-		buf[0] = EVENT_MAP_HOST_CMD;
-		buf[1] = 0x11;
-		CTP_I2C_WRITE(ts->client, I2C_FW_Address, buf, 2);
 	}
 #endif
 #else // WAKEUP_GESTURE
