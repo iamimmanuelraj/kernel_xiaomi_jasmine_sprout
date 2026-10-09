@@ -1050,12 +1050,17 @@ static int32_t __always_inline nvt_ts_suspend(struct device *dev)
 		enable_irq_wake(ts->client->irq);
 #if XIAOMI_PANEL
 	} else {
-		/*
-		 * Keep the controller in normal scan mode (no 0x11 deep sleep):
-		 * waking it from deep sleep needs a full firmware restart that
-		 * costs ~1.5s of dead touch after every screen-on.
-		 */
 		nvt_irq_enable(false);
+#ifndef CONFIG_TOUCHSCREEN_NVT_NO_DEEPSLEEP
+		buf[0] = EVENT_MAP_HOST_CMD;
+		buf[1] = 0x11;
+		CTP_I2C_WRITE(ts->client, I2C_FW_Address, buf, 2);
+#endif
+		/*
+		 * With CONFIG_TOUCHSCREEN_NVT_NO_DEEPSLEEP the controller stays
+		 * in normal scan mode: waking it from deep sleep needs a full
+		 * firmware restart (~1.5s of dead touch after screen-on).
+		 */
 	}
 #endif
 #else // WAKEUP_GESTURE

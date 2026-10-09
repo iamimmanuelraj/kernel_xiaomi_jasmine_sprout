@@ -1371,6 +1371,17 @@ config TOUCHSCREEN_NVT_E7S
 	  To compile this driver as a module, choose M here: the
 	  module will be called nvt.
 
+config TOUCHSCREEN_NVT_NO_DEEPSLEEP
+	bool "Novatek NT36xxx: keep the controller out of deep sleep on suspend"
+	depends on TOUCHSCREEN_NVT_D2S
+	default n
+	help
+	  Do not send the 0x11 deep sleep command when the screen turns off.
+	  Needed for replacement panels whose touch controller is not reset
+	  by the panel power sequence and would otherwise stay dead after
+	  resume (or need a ~1.5s firmware restart). Costs some standby power.
+	  If unsure, say N.
+
 config TOUCHSCREEN_NVT_D2S
 	tristate "novatek touchscreens"
 	select TOUCHSCREEN_NT36XXX
