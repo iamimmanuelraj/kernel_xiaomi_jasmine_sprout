@@ -991,9 +991,6 @@ static inline void nvt_ts_shutdown(struct i2c_client *client)
 #endif
 }
 
-static void nvt_post_resume_work_fn(struct work_struct *work);
-static DECLARE_DELAYED_WORK(nvt_post_resume_work, nvt_post_resume_work_fn);
-
 static void nvt_dbg_state(const char *tag)
 {
 	uint8_t buf[8] = { 0 };
@@ -1012,32 +1009,6 @@ static void nvt_dbg_state(const char *tag)
 		buf[5]);
 }
 
-static void nvt_post_resume_work_fn(struct work_struct *work)
-{
-	uint8_t buf[8];
-	unsigned int irqs, last_irqs = ~0U;
-	uint8_t last_st = 0;
-	int i;
-
-	/* log the controller state every 100ms for 4s (only on change) */
-	for (i = 0; i < 40 && bTouchIsAwake; i++) {
-		buf[0] = EVENT_MAP_RESET_COMPLETE;
-		buf[1] = 0;
-		mutex_lock(&ts->lock);
-		nvt_set_page(I2C_FW_Address, ts->mmap->EVENT_BUF_ADDR |
-			     EVENT_MAP_RESET_COMPLETE);
-		CTP_I2C_READ(ts->client, I2C_FW_Address, buf, 6);
-		mutex_unlock(&ts->lock);
-		irqs = kstat_irqs_usr(ts->client->irq);
-		if (irqs != last_irqs || buf[1] != last_st)
-			pr_info("NVT-ts: poll t=%dms irqs=%u state=0x%02x\n",
-				i * 100, irqs, buf[1]);
-		last_irqs = irqs;
-		last_st = buf[1];
-		msleep(100);
-	}
-}
-
 static int32_t __always_inline nvt_ts_suspend(struct device *dev)
 {
 	uint8_t buf[4] = { 0 };
@@ -1045,8 +1016,6 @@ static int32_t __always_inline nvt_ts_suspend(struct device *dev)
 
 	if (!bTouchIsAwake)
 		return 0;
-
-	cancel_delayed_work_sync(&nvt_post_resume_work);
 
 #if !WAKEUP_GESTURE
 	nvt_irq_enable(false);
@@ -1144,9 +1113,6 @@ static int32_t __always_inline nvt_ts_resume(struct device *dev)
 	bTouchIsAwake = 1;
 
 	mutex_unlock(&ts->lock);
-	if (nvt_late_started)
-		schedule_delayed_work(&nvt_post_resume_work,
-				      msecs_to_jiffies(0));
 #if XIAOMI_PANEL && WAKEUP_GESTURE
 	suspend_state = false;
 	delay_gesture = false;
