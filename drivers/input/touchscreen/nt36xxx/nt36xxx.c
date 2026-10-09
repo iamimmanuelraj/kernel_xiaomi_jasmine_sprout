@@ -18,6 +18,7 @@
 #include <linux/notifier.h>
 #include <linux/fb.h>
 #include <linux/console.h>
+#include <linux/kernel_stat.h>
 #include "nt36xxx.h"
 
 #if TOUCHSCREEN_LAVENDER
@@ -990,6 +991,24 @@ static inline void nvt_ts_shutdown(struct i2c_client *client)
 #endif
 }
 
+static void nvt_dbg_state(const char *tag)
+{
+	uint8_t buf[8] = { 0 };
+
+	mutex_lock(&ts->lock);
+	nvt_set_page(I2C_FW_Address, ts->mmap->EVENT_BUF_ADDR |
+		     EVENT_MAP_RESET_COMPLETE);
+	buf[0] = EVENT_MAP_RESET_COMPLETE;
+	CTP_I2C_READ(ts->client, I2C_FW_Address, buf, 6);
+	mutex_unlock(&ts->lock);
+
+	pr_info("NVT-ts: dbg[%s] awake=%d irq_en=%d int_gpio=%d irqs=%u gesture=%d rst_state=0x%02x fwbuf=%02x %02x %02x %02x %02x\n",
+		tag, bTouchIsAwake, ts->irq_enabled,
+		gpio_get_value(ts->irq_gpio), kstat_irqs_usr(ts->client->irq),
+		enable_gesture_mode, buf[1], buf[1], buf[2], buf[3], buf[4],
+		buf[5]);
+}
+
 static int32_t __always_inline nvt_ts_suspend(struct device *dev)
 {
 	uint8_t buf[4] = { 0 };
@@ -1058,6 +1077,9 @@ static int32_t __always_inline nvt_ts_resume(struct device *dev)
 
 #if NVT_TOUCH_SUPPORT_HW_RST
 	gpio_set_value(ts->reset_gpio, 1);
+#else
+	/* no reset line: wake the controller from the 0x11 sleep command */
+	nvt_bootloader_reset();
 #endif
 
 	if (nvt_check_fw_reset_state(RESET_STATE_REK)) {
@@ -1148,32 +1170,20 @@ static int __always_inline nvt_fb_notifier_callback(struct notifier_block *self,
 	return 0;
 }
 
-static void nvt_fb_set_blank(struct fb_info *fbi, int blank)
-{
-	/* same as writing to /sys/class/graphics/fb0/blank */
-	console_lock();
-	fbi->flags |= FBINFO_MISC_USEREVENT;
-	fb_blank(fbi, blank);
-	fbi->flags &= ~FBINFO_MISC_USEREVENT;
-	console_unlock();
-}
-
 static void nvt_late_init_work(struct work_struct *work)
 {
-	struct fb_info *fbi = registered_fb[0];
-
 	if (nvt_late_started)
 		return;
 	nvt_late_started = true;
 
-	if (!fbi)
-		return;
-
-	pr_info("NVT-ts: running display off/on cycle to start touch controller\n");
-
-	nvt_fb_set_blank(fbi, FB_BLANK_POWERDOWN);
+	pr_info("NVT-ts: late init: touch controller suspend/resume cycle\n");
+	nvt_dbg_state("late-before");
+	nvt_ts_suspend(&ts->client->dev);
 	msleep(300);
-	nvt_fb_set_blank(fbi, FB_BLANK_UNBLANK);
+	nvt_ts_resume(&ts->client->dev);
+	nvt_dbg_state("late-after");
+	msleep(1000);
+	nvt_dbg_state("late+1s");
 }
 
 static const struct i2c_device_id nvt_ts_id[] = {
