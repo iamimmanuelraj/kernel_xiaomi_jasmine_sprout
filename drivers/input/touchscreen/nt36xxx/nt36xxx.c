@@ -1009,6 +1009,25 @@ static void nvt_dbg_state(const char *tag)
 		buf[5]);
 }
 
+/* wait (max ~500ms) until the controller firmware reports a finished reset */
+static bool nvt_wait_fw_ready(void)
+{
+	uint8_t buf[8];
+	int i;
+
+	for (i = 0; i < 50; i++) {
+		buf[0] = EVENT_MAP_RESET_COMPLETE;
+		buf[1] = 0x00;
+		nvt_set_page(I2C_FW_Address, ts->mmap->EVENT_BUF_ADDR |
+			     EVENT_MAP_RESET_COMPLETE);
+		CTP_I2C_READ(ts->client, I2C_FW_Address, buf, 6);
+		if (buf[1] >= RESET_STATE_REK && buf[1] <= 0xAF)
+			return true;
+		msleep(10);
+	}
+	return false;
+}
+
 static int32_t __always_inline nvt_ts_suspend(struct device *dev)
 {
 	uint8_t buf[4] = { 0 };
@@ -1087,6 +1106,11 @@ static int32_t __always_inline nvt_ts_resume(struct device *dev)
 #else
 	/* restart the controller firmware right away, do not wait for the panel */
 	nvt_bootloader_reset();
+	if (!nvt_wait_fw_ready()) {
+		nvt_bootloader_reset();
+		if (!nvt_wait_fw_ready())
+			pr_warn("NVT-ts: firmware not ready after resume reset\n");
+	}
 #endif
 
 	if (nvt_check_fw_reset_state(RESET_STATE_REK)) {
