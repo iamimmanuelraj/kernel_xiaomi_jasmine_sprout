@@ -1014,11 +1014,28 @@ static void nvt_dbg_state(const char *tag)
 
 static void nvt_post_resume_work_fn(struct work_struct *work)
 {
-	if (!bTouchIsAwake)
-		return;
-	nvt_dbg_state("post-resume-0.5s");
-	msleep(2500);
-	nvt_dbg_state("post-resume-3s");
+	uint8_t buf[8];
+	unsigned int irqs, last_irqs = ~0U;
+	uint8_t last_st = 0;
+	int i;
+
+	/* log the controller state every 100ms for 4s (only on change) */
+	for (i = 0; i < 40 && bTouchIsAwake; i++) {
+		buf[0] = EVENT_MAP_RESET_COMPLETE;
+		buf[1] = 0;
+		mutex_lock(&ts->lock);
+		nvt_set_page(I2C_FW_Address, ts->mmap->EVENT_BUF_ADDR |
+			     EVENT_MAP_RESET_COMPLETE);
+		CTP_I2C_READ(ts->client, I2C_FW_Address, buf, 6);
+		mutex_unlock(&ts->lock);
+		irqs = kstat_irqs_usr(ts->client->irq);
+		if (irqs != last_irqs || buf[1] != last_st)
+			pr_info("NVT-ts: poll t=%dms irqs=%u state=0x%02x\n",
+				i * 100, irqs, buf[1]);
+		last_irqs = irqs;
+		last_st = buf[1];
+		msleep(100);
+	}
 }
 
 static int32_t __always_inline nvt_ts_suspend(struct device *dev)
@@ -1098,6 +1115,9 @@ static int32_t __always_inline nvt_ts_resume(struct device *dev)
 
 #if NVT_TOUCH_SUPPORT_HW_RST
 	gpio_set_value(ts->reset_gpio, 1);
+#else
+	/* restart the controller firmware right away, do not wait for the panel */
+	nvt_bootloader_reset();
 #endif
 
 	if (nvt_check_fw_reset_state(RESET_STATE_REK)) {
@@ -1126,7 +1146,7 @@ static int32_t __always_inline nvt_ts_resume(struct device *dev)
 	mutex_unlock(&ts->lock);
 	if (nvt_late_started)
 		schedule_delayed_work(&nvt_post_resume_work,
-				      msecs_to_jiffies(500));
+				      msecs_to_jiffies(0));
 #if XIAOMI_PANEL && WAKEUP_GESTURE
 	suspend_state = false;
 	delay_gesture = false;
