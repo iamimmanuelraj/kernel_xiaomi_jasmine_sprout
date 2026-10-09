@@ -877,8 +877,7 @@ static inline int32_t nvt_ts_probe(struct i2c_client *client,
 	bTouchIsAwake = 1;
 	nvt_irq_enable(true);
 
-	/* run the display cycle early (~2.5 s after boot), before SurfaceFlinger/HWC owns the panel */
-	schedule_delayed_work(&nvt_late_work, msecs_to_jiffies(1800));
+	schedule_delayed_work(&nvt_late_work, msecs_to_jiffies(60000));
 
 	return 0;
 
@@ -1131,6 +1130,13 @@ static int __always_inline nvt_fb_notifier_callback(struct notifier_block *self,
 #endif
 	} else if (evdata && evdata->data && event == FB_EVENT_BLANK) {
 		blank = evdata->data;
+		if (*blank == FB_BLANK_UNBLANK && !nvt_late_armed &&
+		    !nvt_late_started) {
+			/* userspace owns the display now; do the display cycle shortly */
+			nvt_late_armed = true;
+			mod_delayed_work(system_wq, &nvt_late_work,
+					 msecs_to_jiffies(8000));
+		}
 		if (*blank == FB_BLANK_UNBLANK)
 #if TOUCHSCREEN_LAVENDER
 			schedule_work(&g_resume_work);
