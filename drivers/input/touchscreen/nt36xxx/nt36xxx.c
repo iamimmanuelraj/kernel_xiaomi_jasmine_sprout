@@ -1170,20 +1170,37 @@ static int __always_inline nvt_fb_notifier_callback(struct notifier_block *self,
 	return 0;
 }
 
+static void nvt_fb_set_blank(struct fb_info *fbi, int blank)
+{
+	/* same as writing to /sys/class/graphics/fb0/blank */
+	console_lock();
+	fbi->flags |= FBINFO_MISC_USEREVENT;
+	fb_blank(fbi, blank);
+	fbi->flags &= ~FBINFO_MISC_USEREVENT;
+	console_unlock();
+}
+
 static void nvt_late_init_work(struct work_struct *work)
 {
+	struct fb_info *fbi = registered_fb[0];
+
 	if (nvt_late_started)
 		return;
 	nvt_late_started = true;
 
-	pr_info("NVT-ts: late init: touch controller suspend/resume cycle\n");
-	nvt_dbg_state("late-before");
-	nvt_ts_suspend(&ts->client->dev);
+	if (!fbi)
+		return;
+
+	pr_info("NVT-ts: running display off/on cycle to start touch controller\n");
+	nvt_dbg_state("cycle-before");
+	nvt_fb_set_blank(fbi, FB_BLANK_POWERDOWN);
 	msleep(300);
-	nvt_ts_resume(&ts->client->dev);
-	nvt_dbg_state("late-after");
+	nvt_fb_set_blank(fbi, FB_BLANK_UNBLANK);
+	nvt_dbg_state("cycle-after");
 	msleep(1000);
-	nvt_dbg_state("late+1s");
+	nvt_dbg_state("cycle+1s");
+	msleep(4000);
+	nvt_dbg_state("cycle+5s");
 }
 
 static const struct i2c_device_id nvt_ts_id[] = {
