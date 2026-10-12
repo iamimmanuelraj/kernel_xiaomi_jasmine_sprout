@@ -29,6 +29,15 @@ static int __init proc_cmdline_init(void)
 	offset_addr = strstr(cmd, search);
 	if (offset_addr) {
 		size_t tail_len;
+
+		/*
+		 * The search string is one letter short on purpose, so that
+		 * Magisk's binary patch of "skip_initramfs" -> "want_initramfs"
+		 * does not touch it. Swallow the trailing 's' here, otherwise
+		 * the result is "androidboot.force_normal_boot=1s".
+		 */
+		if (offset_addr[search_len] == 's')
+			search_len++;
 		tail_len = strlen(offset_addr+search_len);
 
 		memmove(offset_addr+replace_len,offset_addr+search_len,tail_len+1);
