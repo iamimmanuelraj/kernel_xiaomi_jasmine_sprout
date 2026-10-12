@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2011-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #include <linux/compat.h>
@@ -2530,8 +2530,7 @@ static int kgsl_iommu_get_gpuaddr(struct kgsl_pagetable *pagetable,
 
 	size = kgsl_memdesc_footprint(memdesc);
 
-	align = max_t(uint64_t, 1 << kgsl_memdesc_get_align(memdesc),
-			PAGE_SIZE);
+	align = kgsl_get_align(memdesc);
 
 	if (memdesc->flags & KGSL_MEMFLAGS_FORCE_32BIT) {
 		start = pt->compat_va_start;
@@ -2588,18 +2587,19 @@ static bool kgsl_iommu_addr_in_range(struct kgsl_pagetable *pagetable,
 		uint64_t gpuaddr, uint64_t size)
 {
 	struct kgsl_iommu_pt *pt = pagetable->priv;
+	u64 end = gpuaddr + size;
 
-	if (gpuaddr == 0)
+	/* Make sure we don't wrap around */
+	if (gpuaddr == 0 || end < gpuaddr)
 		return false;
 
-	if (gpuaddr >= pt->va_start && (gpuaddr + size) < pt->va_end)
+	if (gpuaddr >= pt->va_start && end <= pt->va_end)
 		return true;
 
-	if (gpuaddr >= pt->compat_va_start &&
-			(gpuaddr + size) < pt->compat_va_end)
+	if (gpuaddr >= pt->compat_va_start && end <= pt->compat_va_end)
 		return true;
 
-	if (gpuaddr >= pt->svm_start && (gpuaddr + size) < pt->svm_end)
+	if (gpuaddr >= pt->svm_start && end <= pt->svm_end)
 		return true;
 
 	return false;
